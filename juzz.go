@@ -25,21 +25,30 @@ type Worker struct {
 	sync.Mutex
 }
 
-func (w *Worker) SetNext(next *Worker) *Worker {
-	w.SetNexts(map[string]*Worker{"": next})
+func (w *Worker) Next(next *Worker) *Worker {
+	w.NextFor("", next)
 	return next
 }
 
-func (w *Worker) SetNexts(nexts map[string]*Worker) {
-	w.nexts = nexts
-
-	for _, next := range nexts {
-		next.numReferers++
+func (w *Worker) Nexts(nexts map[string]*Worker) {
+	for k, v := range nexts {
+		w.NextFor(k, v)
 	}
 }
 
-func (w *Worker) Run() {
+func (w *Worker) NextFor(result string, next *Worker) {
+	if w.nexts == nil {
+		w.nexts = make(map[string]*Worker)
+	}
+	next.numReferers++
+	w.nexts[result] = next
+}
+
+func (w *Worker) run(wswg *sync.WaitGroup) {
+	wswg.Add(1)
 	go func() {
+		defer wswg.Done()
+
 		wg := &sync.WaitGroup{}
 		for i := 0; i < w.multiplicity; i++ {
 			i := i
@@ -60,7 +69,7 @@ func (w *Worker) Run() {
 				defer next.Unlock()
 
 				next.numReferers--
-				if next.numReferers == 0 {
+				if next.numReferers <= 0 {
 					close(next.in)
 				}
 			}()
@@ -107,12 +116,14 @@ func (w *Worker) runSingle(index int) {
 			}
 		}(ctx)
 	}
+	logs.Info.Printf("%s[%d] was shutdown.", w.name, index)
 }
 
 type Workers struct {
-	starter *Worker
-	workers []*Worker
-	closeCh chan struct{}
+	starter    *Worker
+	workers    []*Worker
+	shutdownCh chan struct{}
+	sync.WaitGroup
 }
 
 func (ws *Workers) NewStarter(name string, fn StartFunc, multiplicity int) *Worker {
@@ -139,21 +150,21 @@ func (ws *Workers) Run() {
 		panic("starter required.")
 	}
 
-	if ws.closeCh != nil {
+	if ws.shutdownCh != nil {
 		panic("already Ran")
 	}
 
-	ws.closeCh = make(chan struct{})
+	ws.shutdownCh = make(chan struct{})
 
 	for _, w := range ws.workers {
-		w.Run()
+		w.run(&ws.WaitGroup)
 	}
 
 	go func() {
 	L:
 		for {
 			select {
-			case <-ws.closeCh:
+			case <-ws.shutdownCh:
 				close(ws.starter.in)
 				break L
 			case ws.starter.in <- nil:
@@ -162,10 +173,7 @@ func (ws *Workers) Run() {
 	}()
 }
 
-func (ws *Workers) Close(timeout time.Duration) {
-	ws.closeCh <- struct{}{}
-
-	// sleep for now
-	// TODO: wait for the last channel close
-	time.Sleep(timeout)
+func (ws *Workers) Shutdown() {
+	ws.shutdownCh <- struct{}{}
+	ws.Wait()
 }
