@@ -1,7 +1,7 @@
 # juzz
 framework to connect and run sequential goroutines.
 
-## 使い方サンプル
+## example
 
 ```go
 	var ws juzz.Workers
