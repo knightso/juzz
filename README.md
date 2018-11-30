@@ -13,7 +13,7 @@ composer := ws.NewWorker("compose", compose, 1)
 renderer := ws.NewWorker("render", render, 10)
 uploader := ws.NewWorker("upload", upload, 1)
 
-observer.Next(scenesGetter).Next(mp4Getter).Next(scenesFlipper).Next(sceneFlipsPutter)
+starter.Next(composer).Next(renderer).Next(uploader)
 
 ws.Run()
 ```
